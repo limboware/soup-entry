@@ -27,11 +27,15 @@ func (x *NetInputSystem) Deactivate() {
 // Load implements [limbov1.ISystem].
 func (x *NetInputSystem) Load() errnov1.Code {
 
-	if !limbov1.GetWorld().CreateCompotype(func() unsafe.Pointer { return unsafe.Pointer(new(WebsocketConn)) }, &WebsocketConnType) {
+	if !limbov1.GetWorld().CreateCompotype(func() unsafe.Pointer { return unsafe.Pointer(new(NetConn)) }, &NetConnType) {
 		return errnov1.ECALL
 	}
 
-	if !limbov1.GetWorld().CreateCompotype(func() unsafe.Pointer { return unsafe.Pointer(new(TCPConn)) }, &TCPConnType) {
+	if !limbov1.GetWorld().CreateCompotype(func() unsafe.Pointer { return unsafe.Pointer(new(NetDraftConn)) }, &NetDraftConnType) {
+		return errnov1.ECALL
+	}
+
+	if !limbov1.GetWorld().CreateCompotype(func() unsafe.Pointer { return unsafe.Pointer(new(NetClient)) }, &NetClientType) {
 		return errnov1.ECALL
 	}
 
@@ -45,16 +49,18 @@ func (x *NetInputSystem) OnAllLoaded() {
 
 func (x *NetInputSystem) onEntityDestroy(_ string, data any) {
 	if e, ok := data.(limbov1.Entity); ok {
-		if ptr := limbov1.ComponentPtr[WebsocketConn](e, WebsocketConnType); ptr != nil {
-			limbov1.Networks().Connection(ptr.Id).Close()
-			limbov1.Networks().Destroy(ptr.Id)
-			limbov1.DestroyComponent(e, WebsocketConnType)
+		if ptr := limbov1.ComponentPtr[NetConn](e, NetConnType); ptr != nil {
+			limbov1.Networks().Connection(ptr.ConnId).Close()
+			limbov1.Networks().Destroy(ptr.ConnId)
+			limbov1.DestroyComponent(e, NetConnType)
 		}
 
-		if ptr := limbov1.ComponentPtr[TCPConn](e, TCPConnType); ptr != nil {
-			limbov1.Networks().Connection(ptr.Id).Close()
-			limbov1.Networks().Destroy(ptr.Id)
-			limbov1.DestroyComponent(e, TCPConnType)
+		if ptr := limbov1.ComponentPtr[NetDraftConn](e, NetDraftConnType); ptr != nil {
+			limbov1.DestroyComponent(e, NetDraftConnType)
+		}
+
+		if ptr := limbov1.ComponentPtr[NetClient](e, NetClientType); ptr != nil {
+			limbov1.DestroyComponent(e, NetClientType)
 		}
 	}
 }
