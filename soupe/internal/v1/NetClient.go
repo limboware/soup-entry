@@ -1,6 +1,6 @@
 package soupev1
 
-import limbov1 "github.com/limboware/pkg/limbo/v1"
+import limbov1 "github.com/limboware/limbo"
 
 var NetClientType = limbov1.Compotype(0)
 

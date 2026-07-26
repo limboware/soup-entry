@@ -3,7 +3,7 @@ package soupev1
 import (
 	"time"
 
-	limbov1 "github.com/limboware/pkg/limbo/v1"
+	limbov1 "github.com/limboware/limbo"
 	errnov1 "github.com/rejchev/errno"
 )
 

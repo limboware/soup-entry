@@ -4,7 +4,7 @@ import (
 	"time"
 	"unsafe"
 
-	limbov1 "github.com/limboware/pkg/limbo/v1"
+	limbov1 "github.com/limboware/limbo"
 	sysutils "github.com/limboware/soupe/utils/syscalls"
 	errnov1 "github.com/rejchev/errno"
 )

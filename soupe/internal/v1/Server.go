@@ -8,7 +8,7 @@ import (
 
 	configsv2 "github.com/limboware/pkg/configs/v2"
 	env2 "github.com/limboware/pkg/env/v2"
-	limbov1 "github.com/limboware/pkg/limbo/v1"
+	limbov1 "github.com/limboware/limbo"
 	errnov1 "github.com/rejchev/errno"
 	"github.com/untrustedmodders/go-plugify"
 )
