@@ -1,0 +1,24 @@
+go 1.26.0
+
+use (
+	./pkg/configs
+	./pkg/env
+	./pkg/limbo
+	./pkg/logger
+	./pkg/s2sdkv213
+	./pkg/structs
+
+	./soupe
+)
+
+replace github.com/untrustedmodders/s2sdkv213 v0.0.0-unpublished => ./pkg/s2sdkv213
+
+replace github.com/limboware/pkg/limbo v0.0.0-unpublished => ./pkg/limbo
+
+replace github.com/limboware/pkg/structs v0.0.0-unpublished => ./pkg/structs
+
+replace github.com/limboware/pkg/env v0.0.0-unpublished => ./pkg/env
+
+replace github.com/limboware/pkg/configs v0.0.0-unpublished => ./pkg/configs
+
+replace github.com/limboware/pkg/logger v0.0.0-unpublished => ./pkg/logger

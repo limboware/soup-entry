@@ -1,0 +1,24 @@
+{
+	"$schema": "https://raw.githubusercontent.com/untrustedmodders/plugify/refs/heads/main/schemas/plugin.schema.json",
+	"version": "0.0.1",
+	"name": "soupe",
+	"description": "A simple game server-side commander & event broadcaster.",
+	"author": "untrustedmodders,limboware",
+	"website": "https://limboware.com",
+	"license": "GPLv3",
+	"entry": "bin/plugify-plugin-soupe",
+	"platforms": [],
+	"language": "golang",
+	"dependencies": [
+		{
+			"name": "configs",
+			"constraints": ">=2.1.0"
+		},
+		{
+			"name": "s2sdk",
+			"constraints": ">=2.13.0"
+		}
+	],
+	"methods": [],
+	"classes":[]
+}
