@@ -1,0 +1,4 @@
+[submodule "pkg/limbo"]
+	path = pkg/limbo
+	url = https://github.com/limboware/limbo
+	branch = dev
