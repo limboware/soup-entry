@@ -5,6 +5,7 @@ use (
 	./pkg/env
 	./pkg/limbo
 	./pkg/logger
+	./pkg/proto
 	./pkg/s2sdkv213
 	./pkg/structs
 
@@ -22,3 +23,5 @@ replace github.com/limboware/pkg/env v0.0.0-unpublished => ./pkg/env
 replace github.com/limboware/pkg/configs v0.0.0-unpublished => ./pkg/configs
 
 replace github.com/limboware/pkg/logger v0.0.0-unpublished => ./pkg/logger
+
+replace github.com/limboware/pkg/proto v0.0.0-unpublished => ./pkg/proto

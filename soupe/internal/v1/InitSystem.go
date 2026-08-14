@@ -2,25 +2,36 @@ package soupev1
 
 import (
 	"time"
+	"unsafe"
 
 	limbov1 "github.com/limboware/limbo"
 	errnov1 "github.com/rejchev/errno"
 )
 
-const SERVER = limbov1.Entity(0)
+var SERVER = limbov1.Entity(0)
 
 const MAX_CLIENTS = 64
 
-var _ limbov1.ISystem = (*InitSystem)(nil)
-
 type InitSystem struct{}
+
+func initSystem(buff *limbov1.System) {
+	v := new(InitSystem)
+
+	*buff = limbov1.System{
+		Instance:   unsafe.Pointer(v),
+		Init:       v.Load,
+		Activate:   v.Activate,
+		Update:     v.Update,
+		Deactivate: v.Deactivate,
+		Destroy:    v.Unload,
+	}
+}
 
 // Activate implements [limbov1.ISystem].
 func (x *InitSystem) Activate() bool {
 	if !limbov1.Entities().IsAlive(SERVER) {
-
 		// Create SERVER
-		_ = limbov1.GetWorld().CreateEntity()
+		SERVER = limbov1.GetWorld().CreateEntity()
 
 		// Create clients like CS2 engine
 		for range MAX_CLIENTS {

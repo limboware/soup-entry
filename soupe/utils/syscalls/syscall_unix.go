@@ -11,3 +11,7 @@ func SetNonblock(fd uintptr, nonb bool) error {
 func Read(fd uintptr, buff []byte) (int, error) {
 	return syscall.Read(int(fd), buff)
 }
+
+func Write(fd uintptr, buff []byte) (int, error) {
+	return syscall.Write(int(fd), buff)
+}

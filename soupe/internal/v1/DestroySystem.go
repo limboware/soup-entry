@@ -10,38 +10,58 @@ import (
 
 var DestroyType = limbov1.Compotype(0)
 
-type Destroy struct{}
-
-var _ limbov1.ISystem = (*Destroy)(nil)
+type Destroy struct {
+	Reason string
+}
 
 type DestroySystem struct{}
 
+func destroySystem(buff *limbov1.System) {
+	v := new(DestroySystem)
+
+	*buff = limbov1.System{
+		Instance:   unsafe.Pointer(v),
+		Init:       v.Load,
+		Activate:   v.Activate,
+		Update:     v.Update,
+		Deactivate: v.Deactivate,
+		Destroy:    v.Unload,
+	}
+}
+
 // Activate implements [limbov1.ISystem].
-func (x *Destroy) Activate() bool {
+func (x *DestroySystem) Activate() bool {
 	return true
 }
 
 // Deactivate implements [limbov1.ISystem].
-func (x *Destroy) Deactivate() {
+func (x *DestroySystem) Deactivate() {
 }
 
 // Load implements [limbov1.ISystem].
-func (x *Destroy) Load() errnov1.Code {
+func (x *DestroySystem) Load() errnov1.Code {
 	if !limbov1.GetWorld().CreateCompotype(func() unsafe.Pointer { return unsafe.Pointer(new(Destroy)) }, &DestroyType) {
 		return errnov1.ECALL
 	}
 
+	// limbov1.Events().Subscribe("world.loaded", x.onAllLoaded)
+	limbov1.Events().Subscribe("entity.destroy", x.onEntityDestroy)
 	return errnov1.OK
 }
 
-// OnAllLoaded implements [limbov1.ISystem].
-func (x *Destroy) OnAllLoaded() {
+func (x *DestroySystem) onEntityDestroy(_ string, data any) {
+	if ent, ok := data.(limbov1.Entity); ok {
+		limbov1.DestroyComponent(ent, DestroyType)
+	}
 }
 
 // Unload implements [limbov1.ISystem].
-func (x *Destroy) Unload() {
+func (x *DestroySystem) Unload() {
 }
 
 // Update implements [limbov1.ISystem].
-func (x *Destroy) Update(dt time.Duration) {
+func (x *DestroySystem) Update(dt time.Duration) {
+	limbov1.Components().IterateB(DestroyType, func(e limbov1.Entity, p unsafe.Pointer) {
+		limbov1.Entities().Destroy(e)
+	})
 }

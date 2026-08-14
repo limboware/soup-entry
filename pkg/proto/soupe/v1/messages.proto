@@ -1,0 +1,41 @@
+syntax = "proto3";
+
+package limboware.soupe.v1;
+
+option go_package = "limboware/pkg/proto/soupe/v1;pbsoupev1";
+
+enum MsgType {
+    Unknown = 0;
+
+    Ping = 1;
+
+    Hello = 2;
+    Welcome = 3;
+
+    Connect = 4;
+    Reconnect = 5;
+    Disconnect = 6;
+
+    Max = 7;
+};
+
+message MsgDone {
+    optional bool ok = 1;
+}
+
+message MsgError {
+    int32 code = 1;
+    string what = 2;
+}
+
+message MsgHello {
+    message Response {
+        bytes pubkey = 2;
+    }
+
+    bytes pubkey = 1;
+}
+
+message MsgConnect {
+    bytes hwid = 1;
+}

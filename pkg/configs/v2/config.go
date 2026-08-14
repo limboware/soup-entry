@@ -50,6 +50,37 @@ func GetConfigValue[T any](v Config, k string, buff *T, castFn func(string, *T) 
 	return false
 }
 
+func IntValue(k string, buff *int) bool {
+	var err error
+
+	if v := Get().Value(k); v != "" {
+		if *buff, err = strconv.Atoi(v); err == nil {
+			return true
+		}
+	}
+
+	return false
+}
+
+func Int64Value(k string, buff *int64) bool {
+	return IntKValue(k, 64, buff)
+}
+
+func Int32Value(k string, buff *int32) bool {
+	return IntKValue(k, 32, buff)
+}
+
+func IntKValue[T int64 | int32 | int8 | int16 | uint8 | uint16 | uint32 | uint64](k string, size int, buff *T) bool {
+	if v := Get().Value(k); v != "" {
+		if res, err := strconv.ParseInt(v, 10, size); err == nil {
+			*buff = T(res)
+			return true
+		}
+	}
+
+	return false
+}
+
 func (x Config) Parse(args []string) errnov1.Code {
 	valAwait := false
 
