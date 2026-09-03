@@ -37,7 +37,7 @@ func (x *TicketSystem) Update(dt time.Duration) {
 
 func (x *TicketSystem) clean() {
 	Tickets().ForEach(func(v Ticket) {
-		if Tickets().IsExpired(v) {
+		if Tickets().IsNotActivated(v) && Tickets().IsExpired(v) {
 			Tickets().Reset(v)
 		}
 	})
@@ -45,6 +45,8 @@ func (x *TicketSystem) clean() {
 
 func (x *TicketSystem) update() {
 	Tickets().ForEach(func(v Ticket) {
-		Tickets().Derive(v)
+		if Tickets().IsExpired(v) {
+			Tickets().Rotate(v)
+		}
 	})
 }

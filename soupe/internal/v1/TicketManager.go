@@ -135,8 +135,12 @@ func (x *TicketManager) Reserve(requester uint64, buff *Ticket) bool {
 	return true
 }
 
+func (x *TicketManager) IsNotActivated(v Ticket) bool {
+	return x.activatedAt[v.Id()] == 0
+}
+
 func (x *TicketManager) IsExpired(v Ticket) bool {
-	return x.activatedAt[v.Id()] == 0 && x.createdAt[v.Id()]+x.duration < time.Now().Unix()
+	return x.createdAt[v.Id()]+x.duration < time.Now().Unix()
 }
 
 func (x *TicketManager) First(buff *Ticket, cond func(Ticket) bool) bool {
@@ -155,7 +159,7 @@ func (x *TicketManager) First(buff *Ticket, cond func(Ticket) bool) bool {
 	return false
 }
 
-func (x *TicketManager) Derive(v Ticket) {
+func (x *TicketManager) Rotate(v Ticket) {
 	rand.Read(x.token[v.Id()][:])
 
 	x.createdAt[v.Id()] = time.Now().Unix()
