@@ -1,16 +1,18 @@
 package soupev1
 
 import (
+	"crypto/rand"
+	"math"
 	"time"
 
-	"github.com/google/uuid"
 	limbov1 "github.com/limboware/limbo"
+	configsv2 "github.com/limboware/pkg/configs/v2"
 	errnov1 "github.com/rejchev/errno"
 )
 
 type Ticket_t struct {
 	Id          Ticket
-	Token       string
+	Token       []byte
 	Requester   uint64
 	ActivatedAt int64
 	CreatedAt   int64
@@ -18,18 +20,14 @@ type Ticket_t struct {
 }
 
 type TicketManager struct {
-	tickets []Ticket
+	token       [MAX_CLIENTS][16]byte
+	requester   [MAX_CLIENTS]uint64
+	createdAt   [MAX_CLIENTS]int64
+	activatedAt [MAX_CLIENTS]int64
+	gen         [MAX_CLIENTS]byte
 
-	gen  []uint8
-	free []uint32
-
-	token       []string
-	requester   []uint64
-	duration    []int64
-	activatedAt []int64
-	createdAt   []int64
-
-	router map[Ticket]int
+	duration int64
+	total    int8
 }
 
 var tickets = TicketManager{}
@@ -39,19 +37,25 @@ func Tickets() *TicketManager {
 }
 
 func (x *TicketManager) Init() errnov1.Code {
-	x.tickets = make([]Ticket, 8)[:]
+	// TODO: add tickets_duration option to config
+	if !configsv2.Int64Value("tickets_duration", &x.duration) {
+		return errnov1.EINVAL
+	}
 
-	x.gen = make([]uint8, 8)[:]
-	x.free = make([]uint32, 8)[:]
+	// TODO: add players option to config
+	if !configsv2.IntKValue("players", 1, &x.total) {
+		return errnov1.EINVAL
+	}
 
-	x.token = make([]string, 8)[:]
-	x.requester = make([]uint64, 8)[:]
+	if x.total > MAX_CLIENTS {
+		x.total = MAX_CLIENTS
+	}
 
-	x.duration = make([]int64, 8)[:]
-	x.activatedAt = make([]int64, 8)[:]
-	x.createdAt = make([]int64, 8)[:]
-
-	x.router = make(map[Ticket]int)
+	x.token = [MAX_CLIENTS][16]byte{}
+	x.requester = [MAX_CLIENTS]uint64{}
+	x.createdAt = [MAX_CLIENTS]int64{}
+	x.activatedAt = [MAX_CLIENTS]int64{}
+	x.gen = [MAX_CLIENTS]byte{}
 
 	return errnov1.OK
 }
@@ -63,12 +67,8 @@ func (x *TicketManager) Ticket(id Ticket, buff *Ticket_t) {
 		Requester:   x.Requester(id),
 		ActivatedAt: x.ActivatedAt(id),
 		CreatedAt:   x.CreatedAt(id),
-		Duration:    x.Duration(id),
+		Duration:    x.Duration(),
 	}
-}
-
-func (x *TicketManager) route(v Ticket) int {
-	return x.router[v]
 }
 
 func (x *TicketManager) Activate(v Ticket) bool {
@@ -81,82 +81,118 @@ func (x *TicketManager) Activate(v Ticket) bool {
 }
 
 func (x *TicketManager) CreatedAt(v Ticket) int64 {
-	return x.createdAt[x.route(v)]
+	return x.createdAt[v.Id()]
 }
 
-func (x *TicketManager) Duration(v Ticket) int64 {
-	return x.duration[x.route(v)]
+func (x *TicketManager) Duration() int64 {
+	return x.duration
 }
 
 func (x *TicketManager) ActivatedAt(v Ticket) int64 {
-	return x.activatedAt[x.route(v)]
+	return x.activatedAt[v.Id()]
 }
 
 func (x *TicketManager) Requester(v Ticket) uint64 {
-	return x.requester[x.route(v)]
+	return x.requester[v.Id()]
 }
 
-func (x *TicketManager) Token(v Ticket) string {
-	return x.token[x.route(v)]
+func (x *TicketManager) Token(v Ticket) []byte {
+	return x.token[v.Id()][:]
+}
+
+func (x *TicketManager) Total() int8 {
+	return x.total
 }
 
 func (x *TicketManager) IsAlive(v Ticket) bool {
-	return x.gen[x.route(v)] == v.Gen()
+	return x.gen[v.Id()] == v.Gen()
 }
 
-func (x *TicketManager) Create(requester uint64, duration int64, buff *Ticket) bool {
-	idx := uint32(0)
+func (x *TicketManager) IsReserved(v Ticket) bool {
+	return x.requester[v.Id()] != 0
+}
 
-	if len(x.free) > 0 {
-		idx = x.free[len(x.free)-1]
-		x.free = x.free[:len(x.free)-1]
-	} else {
-		idx = uint32(len(x.gen))
-		x.gen = append(x.gen, 0)
+// Reserved on duration time
+func (x *TicketManager) Reserve(requester uint64, buff *Ticket) bool {
+	if requester == 0 || buff == nil {
+		return false
 	}
 
-	if len(x.token) <= int(idx) {
-		x.token = append(x.token, "")
+	ticket := Ticket(0)
+
+	if !x.First(&ticket, func(v Ticket) bool {
+		return x.Requester(v) == 0
+	}) {
+		return false
 	}
 
-	if len(x.requester) <= int(idx) {
-		x.requester = append(x.requester, 0)
-	}
+	x.requester[ticket.Id()] = requester
 
-	if len(x.activatedAt) <= int(idx) {
-		x.activatedAt = append(x.activatedAt, 0)
-	}
+	*buff = ticket
 
-	if len(x.duration) <= int(idx) {
-		x.duration = append(x.duration, 0)
-	}
-
-	if len(x.createdAt) <= int(idx) {
-		x.createdAt = append(x.createdAt, 0)
-	}
-
-	x.token[idx] = uuid.NewString()
-	x.requester[idx] = requester
-	x.duration[idx] = duration
-	x.createdAt[idx] = time.Now().Unix()
-
-	*buff = MakeTicket(idx, x.gen[idx])
-
-	x.tickets = append(x.tickets, *buff)
-	x.router[*buff] = len(x.tickets) - 1
-
-	limbov1.Events().Publish("tickets.created", *buff)
+	limbov1.Events().Publish("tickets.reserved", *buff)
 
 	return true
 }
 
-func (x *TicketManager) Iterator() *limbov1.Iterator[Ticket] {
-	tickets := make([]Ticket, len(x.tickets))
-
-	copy(tickets, x.tickets)
-
-	return limbov1.NewIterator[Ticket](tickets)
+func (x *TicketManager) IsExpired(v Ticket) bool {
+	return x.activatedAt[v.Id()] == 0 && x.createdAt[v.Id()]+x.duration < time.Now().Unix()
 }
 
-// TODO: impl
-func (x *TicketManager) Destroy(v Ticket) {}
+func (x *TicketManager) First(buff *Ticket, cond func(Ticket) bool) bool {
+	if buff == nil {
+		return false
+	}
+
+	for i := range x.total {
+		ticket := MakeTicket(uint8(i), x.gen[i])
+		if cond(ticket) {
+			*buff = ticket
+			return true
+		}
+	}
+
+	return false
+}
+
+func (x *TicketManager) Derive(v Ticket) {
+	rand.Read(x.token[v.Id()][:])
+
+	x.createdAt[v.Id()] = time.Now().Unix()
+}
+
+func (x *TicketManager) ForEach(fn func(Ticket)) {
+	for i := range x.total {
+		fn(MakeTicket(uint8(i), x.gen[i]))
+	}
+}
+
+func (x *TicketManager) Unreserve(v Ticket) {
+	if !x.IsAlive(v) {
+		return
+	}
+
+	x.requester[v.Id()] = 0
+	x.createdAt[v.Id()] = 0
+}
+
+func (x *TicketManager) Reset(v Ticket) {
+	if !x.IsAlive(v) {
+		return
+	}
+
+	limbov1.Events().Publish("tickets.reset", v)
+
+	x.requester[v.Id()] = 0
+	x.token[v.Id()] = [16]byte{}
+	x.createdAt[v.Id()] = 0
+	x.activatedAt[v.Id()] = 0
+
+	if x.gen[v.Id()] == math.MaxUint8 {
+		x.gen[v.Id()] = 0
+	}
+
+	x.gen[v.Id()]++
+
+	limbov1.Events().Publish("tickets.reseted", v)
+}
