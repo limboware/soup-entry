@@ -1,1 +1,6 @@
+github.com/google/go-cmp v0.7.0 h1:wk8382ETsv4JYUZwIsn6YpYiWiBsYLSJiTsyBybVuN8=
 github.com/rejchev/errno v1.0.0 h1:nG/gQ5i00IGbz1nsXtKDnSASd4+JQQcfvkvGMXx6/N4=
+github.com/untrustedmodders/go-plugify v1.10.3 h1:HobI9jr3j5VYurm+UgqNoYqsku/4oUo6UqkHcC1NgVM=
+golang.org/x/mod v0.38.0 h1:MECBjubtXD7yj4HrhIUcywNaGeNVUdfVnxmPajOk4yk=
+golang.org/x/sync v0.22.0 h1:SZjpbeLmrCk4xhRSZFNZW5gFUeCeFgjekvI/+gfScek=
+golang.org/x/tools v0.48.0 h1:3+hClM1aLL5mjMKm5ovokw9epgRXPuu2tILgismM6RE=
