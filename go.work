@@ -5,14 +5,17 @@ use (
 	./pkg/env
 	./pkg/limbo
 	./pkg/logger
+	./pkg/plconfigs
 	./pkg/proto
-	./pkg/s2sdkv213
+	./pkg/s2sdk
 	./pkg/structs
 
 	./soupe
 )
 
-replace github.com/untrustedmodders/s2sdkv213 v0.0.0-unpublished => ./pkg/s2sdkv213
+replace github.com/untrustedmodders/s2sdk/213 v0.0.0-unpublished => ./pkg/s2sdk
+
+replace github.com/untrustedmodders/plconfigs/211 v0.0.0-unpublished => ./pkg/plconfigs
 
 replace github.com/limboware/pkg/limbo v0.0.0-unpublished => ./pkg/limbo
 
