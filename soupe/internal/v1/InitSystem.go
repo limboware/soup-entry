@@ -33,11 +33,6 @@ func (x *InitSystem) Activate() bool {
 		// Create SERVER
 		SERVER = limbov1.GetWorld().CreateEntity()
 
-		// Create clients like CS2 engine
-		for range MAX_CLIENTS {
-			_ = limbov1.NewComponentB[Client](limbov1.GetWorld().CreateEntity(), ClientType)
-		}
-
 		// TODO: Create brokers (after loading config with known size)
 		// ...
 	}

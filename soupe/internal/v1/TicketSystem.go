@@ -29,24 +29,4 @@ func (x *TicketSystem) Load() errnov1.Code {
 
 func (x *TicketSystem) Unload() {}
 
-func (x *TicketSystem) Update(dt time.Duration) {
-	x.clean()
-
-	x.update()
-}
-
-func (x *TicketSystem) clean() {
-	Tickets().ForEach(func(v Ticket) {
-		if Tickets().IsNotActivated(v) && Tickets().IsExpired(v) {
-			Tickets().Reset(v)
-		}
-	})
-}
-
-func (x *TicketSystem) update() {
-	Tickets().ForEach(func(v Ticket) {
-		if Tickets().IsExpired(v) {
-			Tickets().Rotate(v)
-		}
-	})
-}
+func (x *TicketSystem) Update(dt time.Duration) {}

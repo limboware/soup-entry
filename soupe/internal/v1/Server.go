@@ -1,16 +1,14 @@
 package soupev1
 
 import (
-	"fmt"
-	"os"
 	"time"
 
 	limbov1 "github.com/limboware/limbo"
 	configsv2 "github.com/limboware/pkg/configs/v2"
 	env2 "github.com/limboware/pkg/env/v2"
+	loggerv1 "github.com/limboware/pkg/logger/v1"
 	errnov1 "github.com/rejchev/errno"
-	"github.com/untrustedmodders/go-plugify"
-	"github.com/untrustedmodders/s2sdkv213/s2sdk"
+	s2sdk "github.com/untrustedmodders/s2sdk/213"
 )
 
 type UseCommand struct {
@@ -28,23 +26,21 @@ func Get() *Server {
 }
 
 func (x *Server) Init() errnov1.Code {
-	if err := configsv2.GetConfig().Parse(os.Args); errnov1.FAIL(err) {
+	if err := loggerv1.Get().Init(); errnov1.FAIL(err) {
 		return err
 	}
 
-	if err := configsv2.Get().ParseEnvi(os.Environ()); errnov1.FAIL(err) {
+	if err := configsv2.Get().ParsePlug("soupe.json"); errnov1.FAIL(err) {
 		return err
 	}
+
+	loggerv1.Get().Err("hellow")
 
 	env2.Receive(configsv2.GetConfig().ValueA("env", "prod"))
 
-	// loggerv1.Get().System()
-
-	plugify.Log(fmt.Sprintf("soupe in %s mod", env2.Get().String()), plugify.Info, "test", 0)
-
-	// if err := loggerv1.Get().Init(); errnov1.FAIL(err) {
-	// 	return err
-	// }
+	if err := loggerv1.Get().Init(); errnov1.FAIL(err) {
+		return err
+	}
 
 	if err := limbov1.InitNetModule(); errnov1.FAIL(err) {
 		return err
@@ -68,16 +64,14 @@ func (x *Server) Init() errnov1.Code {
 
 	limbov1.SystemRegister[InitSystem](initSystem)
 	limbov1.SystemRegister[NetInputSystem](netInputSystem)
+	limbov1.SystemRegister[TicketSystem](ticketSystem)
+	limbov1.SystemRegister[SlotSystem](slotSystem)
 	limbov1.SystemRegister[NetSystem](netSystem)
 	limbov1.SystemRegister[DestroySystem](destroySystem)
 
 	if err := limbov1.GetWorld().Init(); errnov1.FAIL(err) {
 		return err
 	}
-
-	flags := s2sdk.ConVarFlag_LinkedConcommand | s2sdk.ConVarFlag_Release | s2sdk.ConVarFlag_ClientCanExecute
-
-	s2sdk.AddConsoleCommand("sm_sticket", "Get ticket to connect", flags, x.onClientCommand, s2sdk.HookMode_Post)
 
 	return errnov1.OK
 }
@@ -90,21 +84,6 @@ func (x *Server) Update(dt float32) {
 	}
 
 	limbov1.Events().PostPublisherRun()
-}
-
-func (x *Server) onClientCommand(caller int32, context s2sdk.ConCommandContext, arguments []string) s2sdk.ResultType {
-
-	if caller != -1 {
-		if handle := s2sdk.PlayerSlotToEntHandle(caller); s2sdk.IsValidEntHandle(handle) && s2sdk.IsClientInGame(caller) && !s2sdk.IsClientSourceTV(caller) {
-			limbov1.Events().PublishAsync("s2sdk.cmd", &UseCommand{
-				Caller:  caller,
-				Context: context,
-				Args:    arguments,
-			})
-		}
-	}
-
-	return s2sdk.ResultType_Handled
 }
 
 func (x *Server) Destroy() {

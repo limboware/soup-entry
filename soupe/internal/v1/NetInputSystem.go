@@ -64,7 +64,7 @@ func (x *NetInputSystem) Load() errnov1.Code {
 	x.sequenceJumpMax = 10000
 	x.desyncMax = 3
 
-	if !limbov1.GetWorld().CreateCompotype(func() unsafe.Pointer { return unsafe.Pointer(new(NetClient)) }, &NetClientType) {
+	if !limbov1.GetWorld().CreateCompotype(func() unsafe.Pointer { return unsafe.Pointer(new(Conn)) }, &ConnType) {
 		return errnov1.ECALL
 	}
 
@@ -78,7 +78,6 @@ func (x *NetInputSystem) Load() errnov1.Code {
 	return errnov1.OK
 }
 
-// OnAllLoaded implements [limbov1.ISystem].
 func (x *NetInputSystem) onAllLoaded(string, any) {
 	limbov1.NetworkHandlers().Register(TcpConnType, limbov1.NetMessageType(pbsoupev1.MsgType_Hello), x.helloMsgHandler)
 }
@@ -90,9 +89,9 @@ func (x *NetInputSystem) helloMsgHandler(e limbov1.Entity, data *byte, count uin
 		return errnov1.EINVAL
 	}
 
-	sptr := limbov1.ComponentPtr[NetClient](e, NetClientType)
+	connPtr := limbov1.ComponentPtr[Conn](e, ConnType)
 
-	if sptr == nil || sptr.HandshakedAt != 0 {
+	if connPtr == nil || connPtr.HandshakedAt != 0 {
 		return errnov1.ECALL
 	}
 
@@ -103,17 +102,6 @@ func (x *NetInputSystem) helloMsgHandler(e limbov1.Entity, data *byte, count uin
 
 	if len(payload.Pubkey) < 32 || len(payload.Pubkey) > 36 {
 		loggerv1.Get().Err("[NetInputSystem::helloMsgHandler] #%d pubkey check failed (len: %d)", e, len(payload.Pubkey))
-		return errnov1.EINVAL
-	}
-
-	ticketId := TicketFrom(netMessage.Reserved())
-
-	if !Tickets().IsAlive(ticketId) {
-		return errnov1.EINVAL
-	}
-
-	sptr.SteamId = 0
-	if sptr.SteamId = Tickets().Requester(ticketId); sptr.SteamId == 0 {
 		return errnov1.EINVAL
 	}
 
@@ -134,62 +122,77 @@ func (x *NetInputSystem) helloMsgHandler(e limbov1.Entity, data *byte, count uin
 		return errnov1.EINVAL
 	}
 
-	sptr.ConnSharedkey = sharedSecret
-	sptr.ConnServerPubKey = serverPubKey
-	sptr.ConnServerPrivKey = serverPrivKey
-	sptr.ConnPubKey = payload.Pubkey
+	connPtr.Sharedkey = sharedSecret
+	connPtr.ServerPubKey = serverPubKey
+	connPtr.ServerPrivKey = serverPrivKey
+	connPtr.PubKey = payload.Pubkey
 
-	if err := x.deriveKeys(e, sptr); errnov1.FAIL(err) {
+	if err := x.deriveKeys(e, connPtr); errnov1.FAIL(err) {
 		return err
 	}
 
-	sptr.SeqInno = 0
-	sptr.SeqOutno = 0
+	connPtr.SeqInno = 0
+	connPtr.SeqOutno = 0
 
-	if SendNetMessageD(limbov1.NetMessageType(pbsoupev1.MsgType_Welcome), &pbsoupev1.MsgHello_Response{
+	slotID := uint8(0)
+	if !Slots().First(&slotID, func(u uint8) bool {
+		return Slots().IsAvailable(u) && !Tickets().IsExpired(Slots().Ticket(u))
+	}) {
+		return errnov1.EINVAL
+	}
+
+	if !SendNetMessageD(limbov1.NetMessageType(pbsoupev1.MsgType_Welcome), &pbsoupev1.MsgHello_Response{
 		Pubkey: serverPubKey,
 	}, e) {
-
-		_ = Tickets().Activate(ticketId)
-
-		sptr.TouchedAt = time.Now().Unix()
-		sptr.HandshakedAt = time.Now().Unix()
-		return errnov1.OK
+		return errnov1.ECALL
 	}
+
+	Tickets().Remove(Slots().Ticket(slotID))
+
+	clientPtr := (*Client)(nil)
+	if clientPtr = limbov1.ComponentPtr[Client](e, ClientType); clientPtr == nil {
+		clientPtr = limbov1.NewComponentB[Client](e, ClientType)
+	}
+
+	clientPtr.Id = Slots().Owner(slotID)
+	clientPtr.SlotID = slotID
+	clientPtr.ConnectedAt = time.Now().Unix()
+
+	connPtr.HandshakedAt = time.Now().Unix()
 
 	return errnov1.ECALL
 }
 
-func (x *NetInputSystem) deriveKeys(e limbov1.Entity, ptr *NetClient) errnov1.Code {
+func (x *NetInputSystem) deriveKeys(e limbov1.Entity, ptr *Conn) errnov1.Code {
 	sid := make([]byte, 8)[:8]
-	binary.BigEndian.PutUint64(sid, ptr.Id)
+	binary.BigEndian.PutUint64(sid, ptr.SessionID)
 
 	salt := fmt.Appendf(nil, "%s_skv%d", string(sid), limbov1.NETMSG_VERSION)
 
-	hkdf := hkdf.New(sha512.New, ptr.ConnSharedkey, salt, nil)
+	hkdf := hkdf.New(sha512.New, ptr.Sharedkey, salt, nil)
 
-	ptr.ConnReadAES = make([]byte, 32)[:32]
-	if _, err := io.ReadFull(hkdf, ptr.ConnReadAES); err != nil {
+	ptr.ReadAES = make([]byte, 32)[:32]
+	if _, err := io.ReadFull(hkdf, ptr.ReadAES); err != nil {
 		return errnov1.ECALL
 	}
 
-	ptr.ConnWriteAES = make([]byte, 32)[:32]
-	if _, err := io.ReadFull(hkdf, ptr.ConnWriteAES); err != nil {
+	ptr.WriteAES = make([]byte, 32)[:32]
+	if _, err := io.ReadFull(hkdf, ptr.WriteAES); err != nil {
 		return errnov1.ECALL
 	}
 
-	ptr.ConnReadNonce = make([]byte, 12)[:12]
-	if _, err := io.ReadFull(hkdf, ptr.ConnReadNonce); err != nil {
+	ptr.ReadNonce = make([]byte, 12)[:12]
+	if _, err := io.ReadFull(hkdf, ptr.ReadNonce); err != nil {
 		return errnov1.ECALL
 	}
 
-	ptr.ConnWriteNonce = make([]byte, 12)[:12]
-	if _, err := io.ReadFull(hkdf, ptr.ConnWriteNonce); err != nil {
+	ptr.WriteNonce = make([]byte, 12)[:12]
+	if _, err := io.ReadFull(hkdf, ptr.WriteNonce); err != nil {
 		return errnov1.ECALL
 	}
 
-	ptr.ConnRotateKey = make([]byte, 32)[:32]
-	if _, err := io.ReadFull(hkdf, ptr.ConnRotateKey); err != nil {
+	ptr.RotateKey = make([]byte, 32)[:32]
+	if _, err := io.ReadFull(hkdf, ptr.RotateKey); err != nil {
 		return errnov1.ECALL
 	}
 
@@ -199,12 +202,12 @@ func (x *NetInputSystem) deriveKeys(e limbov1.Entity, ptr *NetClient) errnov1.Co
 func (x *NetInputSystem) onEntityDestroy(_ string, data any) {
 	if e, ok := data.(limbov1.Entity); ok {
 
-		if ptr := limbov1.ComponentPtr[NetClient](e, NetClientType); ptr != nil {
-			if limbov1.Networks().IsAlive(ptr.ConnId) {
-				limbov1.Networks().Destroy(ptr.ConnId)
+		if ptr := limbov1.ComponentPtr[Conn](e, ConnType); ptr != nil {
+			if limbov1.Networks().IsAlive(ptr.Id) {
+				limbov1.Networks().Destroy(ptr.Id)
 			}
 
-			limbov1.DestroyComponent(e, NetClientType)
+			limbov1.DestroyComponent(e, ConnType)
 		}
 
 		if ptr := limbov1.ComponentPtr[Client](e, ClientType); ptr != nil {
@@ -219,203 +222,133 @@ func (x *NetInputSystem) Unload() {
 
 // Update implements [limbov1.ISystem].
 func (x *NetInputSystem) Update(dt time.Duration) {
-	x.recv(dt)
+	x.recv()
 }
 
-func (x *NetInputSystem) recv(dt time.Duration) {
-	limbov1.Components().IterateB(NetClientType, func(e limbov1.Entity, p unsafe.Pointer) {
+func (x *NetInputSystem) recv() {
+	limbov1.Components().IterateB(ConnType, func(e limbov1.Entity, p unsafe.Pointer) {
 		if limbov1.ContainsComponent(e, DestroyType) {
 			return
 		}
 
-		ndptr := (*NetClient)(p)
+		connPtr := (*Conn)(p)
 
-		ndptr.IdleDuration++
+		connFD := uintptr(0)
+		limbov1.Networks().Handle(connPtr.Id, &connFD)
 
-		if times := time.Duration(ndptr.IdleDuration) * dt; times >= x.sessionsTimeOut || ndptr.ReadDesyncCounter >= x.desyncMax {
-			// ndptr.IdleDuration = 0
+		netMsgPtr := (*limbov1.NetMessage)(&connPtr.ReadBuffer[0])
 
-			if limbov1.Networks().IsAlive(ndptr.ConnId) {
-				ndptr.ConnFileHandle = 0
-				limbov1.Networks().Destroy(ndptr.ConnId)
-			}
+		total := limbov1.NETMSG_HEADER_SIZE
 
-			if times >= x.sessionsTimeOut+30*time.Second {
-				loggerv1.Get().Debug("#%d session disconnect cause timeout (t: %d; tt: %d)", e, times, x.sessionsTimeOut+30*time.Second)
-				x.disconnect(e, "timeout")
+		if connPtr.ReadBufferPos >= limbov1.NETMSG_HEADER_SIZE {
+			total = int(netMsgPtr.TotalLen())
+		}
+
+		if connPtr.ReadBufferPos != total {
+			n, err := sysutils.Read(connFD, connPtr.ReadBuffer[connPtr.ReadBufferPos:total])
+
+			if err == syscall.EAGAIN || err == syscall.EWOULDBLOCK || n <= 0 {
 				return
 			}
 
-			if ndptr.ReadDesyncCounter >= x.desyncMax {
-				x.disconnect(e, "desynced")
-			}
-
-			return
-		}
-
-		if ndptr.ConnFileHandle == 0 {
-			return
-		}
-
-		if ndptr.ReadBufferPos < limbov1.NETMSG_HEADER_SIZE {
-
-			n, err := sysutils.Read(ndptr.ConnFileHandle, ndptr.ReadBuffer[ndptr.ReadBufferPos:limbov1.NETMSG_HEADER_SIZE])
-
-			if err == syscall.EAGAIN || err == syscall.EWOULDBLOCK || n == 0 {
-				return
-			}
-
-			if n > 0 && err == nil {
-				ndptr.IdleDuration = 0
-				ndptr.ReadBufferPos += n
-				ndptr.BytesIn += uint64(n)
-
-				loggerv1.Get().Debug("[NetInputSystem::recv] #%d message read progress: %d (total: %d)", e, ndptr.ReadBufferPos, limbov1.NETMSG_HEADER_SIZE)
-
-				if ndptr.ReadBufferPos >= limbov1.NETMSG_HEADER_SIZE {
-					if !x.isHeaderPotentialValid(e, ndptr, &ndptr.ReadBuffer[0], limbov1.NETMSG_HEADER_SIZE) {
-						ndptr.ReadBuffer = ndptr.ReadBuffer[:][:limbov1.NETMSG_HEADER_SIZE]
-						ndptr.ReadBufferPos = 0
-						ndptr.ReadDesyncCounter++
-						return
-					}
-
-					if ndptr.ReadDesyncCounter > 0 {
-						ndptr.ReadDesyncCounter = 0
-					}
-				}
-			}
-
-			// not interesting
 			if err != nil {
-				loggerv1.Get().Debug("[NetInputSystem::recv] #%d message read (bts %d; total: %d) err: %v", e, ndptr.ReadBufferPos, limbov1.NETMSG_HEADER_SIZE, err)
+				loggerv1.Get().Debug("[NetInputSystem::recv] #%d message read (bts %d; total: %d) err: %v", e, connPtr.ReadBufferPos, limbov1.NETMSG_HEADER_SIZE, err)
+				return
+			}
+
+			connPtr.ReadBufferPos += n
+			connPtr.BytesIn += uint64(n)
+
+			if connPtr.ReadBufferPos == limbov1.NETMSG_HEADER_SIZE {
+				if !x.isHeaderPotentialValid(e, connPtr, netMsgPtr.Closer(), limbov1.NETMSG_HEADER_SIZE) {
+					connPtr.ReadBuffer = connPtr.ReadBuffer[:][:limbov1.NETMSG_HEADER_SIZE]
+					connPtr.ReadBufferPos = 0
+					connPtr.ReadDesyncCounter++
+					return
+				}
+
+				total = int(netMsgPtr.TotalLen())
+
+				if cap(connPtr.ReadBuffer) < total {
+					connPtr.ReadBuffer = slices.Grow(connPtr.ReadBuffer, total-cap(connPtr.ReadBuffer))
+				}
+			}
+
+			if connPtr.ReadBufferPos != total {
 				return
 			}
 		}
 
-		if ndptr.ReadBufferPos >= limbov1.NETMSG_HEADER_SIZE {
-			nMsg := (*limbov1.NetMessage)(&ndptr.ReadBuffer[0])
+		if netMsgPtr.PayloadChecksum() != netMsgPtr.PayloadRealChecksum() {
+			connPtr.ReadBuffer = connPtr.ReadBuffer[:][:limbov1.NETMSG_HEADER_SIZE]
+			connPtr.ReadBufferPos = 0
+			connPtr.ReadDesyncCounter++
+			return
+		}
 
-			totalLen := nMsg.PayloadLen() + limbov1.NETMSG_HEADER_SIZE
+		if netMsgPtr.Flags().Contains(limbov1.FlagEncrypted) {
+			// client nonce
+			nonce := make([]byte, 12)
+			copy(nonce, connPtr.ReadNonce)
+			binary.LittleEndian.PutUint32(nonce[8:], binary.LittleEndian.Uint32(nonce[8:])^netMsgPtr.Sequence())
 
-			if nMsg.Flags().Contains(limbov1.FlagEncrypted) {
-				totalLen += limbov1.NETMSG_GCM_SIZE
+			// AES-GCM decrypting
+			block, err := aes.NewCipher(connPtr.ReadAES)
+
+			if err != nil {
+				connPtr.ReadBuffer = connPtr.ReadBuffer[:][:limbov1.NETMSG_HEADER_SIZE]
+				connPtr.ReadBufferPos = 0
+				return
 			}
 
-			if int(nMsg.PayloadLen()) > 0 && cap(ndptr.ReadBuffer) < int(totalLen) {
-				buffer := make([]byte, totalLen)[:totalLen]
-
-				copy(buffer, ndptr.ReadBuffer)
-
-				ndptr.ReadBuffer = buffer
+			aead, err := cipher.NewGCM(block)
+			if err != nil {
+				connPtr.ReadBuffer = connPtr.ReadBuffer[:][:limbov1.NETMSG_HEADER_SIZE]
+				connPtr.ReadBufferPos = 0
+				return
 			}
 
-			szReadWindow := 4096
-
-			szRemainingBytes := totalLen - uint32(ndptr.ReadBufferPos)
-
-			if szRemainingBytes < uint32(szReadWindow) {
-				szReadWindow = int(szRemainingBytes)
+			text, err := aead.Open(nil, nonce, connPtr.ReadBuffer[limbov1.NETMSG_HEADER_SIZE:], connPtr.ReadBuffer[:limbov1.NETMSG_HEADER_SIZE])
+			if err != nil {
+				connPtr.ReadBuffer = connPtr.ReadBuffer[:][:limbov1.NETMSG_HEADER_SIZE]
+				connPtr.ReadBufferPos = 0
+				return
 			}
 
-			if szReadWindow > 0 {
-
-				n, err := sysutils.Read(ndptr.ConnFileHandle, ndptr.ReadBuffer[ndptr.ReadBufferPos:ndptr.ReadBufferPos+szReadWindow])
-
-				if err == syscall.EAGAIN || err == syscall.EWOULDBLOCK || n == 0 {
-					return
-				}
-
-				if n > 0 && err == nil {
-					ndptr.ReadBufferPos += n
-					ndptr.IdleDuration = 0
-					ndptr.BytesIn += uint64(n)
-					loggerv1.Get().Debug("[NetInputSystem::recv] #%d message read progress: %d (total: %d)", e, ndptr.ReadBufferPos, totalLen)
-				}
-
-				if err != nil {
-					loggerv1.Get().Debug("[NetInputSystem::recv] #%d message read (bts %d; total: %d) err: %v", e, ndptr.ReadBufferPos, totalLen, err)
-					return
-				}
+			if szDiv := int(total-limbov1.NETMSG_HEADER_SIZE) - len(text); szDiv < 0 {
+				szDiv *= -1
+				total += szDiv
+				connPtr.ReadBuffer = slices.Grow(connPtr.ReadBuffer, szDiv)
 			}
 
-			// прочитали сообщение целиком
-			if ndptr.ReadBufferPos == int(totalLen) {
-				loggerv1.Get().Debug("[NetInputSystem::recv] #%d message fully readed: %v (len: %d; total: %d)", e, ndptr.ReadBuffer, ndptr.ReadBufferPos, totalLen)
+			copy(connPtr.ReadBuffer[limbov1.NETMSG_HEADER_SIZE:], text)
+		}
 
-				if nMsg.PayloadChecksum() != nMsg.PayloadRealChecksum() {
-					ndptr.ReadBuffer = ndptr.ReadBuffer[:][:limbov1.NETMSG_HEADER_SIZE]
-					ndptr.ReadBufferPos = 0
-					ndptr.ReadDesyncCounter++
-					return
+		connPtr.SeqInno = netMsgPtr.Sequence()
+
+		if x.isMessageHandlable(e, connPtr, netMsgPtr.Closer()) {
+			loggerv1.Get().Debug("[NetInputSystem::recv] #%d handler conn type: %d; msg type: %d -> %d", e, connPtr.Id.Type(), netMsgPtr.Type(), limbov1.MakeNetworkHandler(
+				connPtr.Id.Type(),
+				netMsgPtr.Type(),
+			))
+			if handlerFn := limbov1.NetworkHandlers().Get(limbov1.MakeNetworkHandler(connPtr.Id.Type(), netMsgPtr.Type())); handlerFn != nil {
+				if errno := handlerFn(e, netMsgPtr.Closer(), uint32(total)); errnov1.SUCCESS(errno) {
+					connPtr.TouchedAt = time.Now().Unix()
 				}
-
-				if nMsg.Flags().Contains(limbov1.FlagEncrypted) {
-					// client nonce
-					nonce := make([]byte, 12)
-					copy(nonce, ndptr.ConnReadNonce)
-					binary.LittleEndian.PutUint32(nonce[8:], binary.LittleEndian.Uint32(nonce[8:])^nMsg.Sequence())
-
-					// AES-GCM decrypting
-					block, err := aes.NewCipher(ndptr.ConnReadAES)
-
-					if err != nil {
-						ndptr.ReadBuffer = ndptr.ReadBuffer[:][:limbov1.NETMSG_HEADER_SIZE]
-						ndptr.ReadBufferPos = 0
-						return
-					}
-
-					aead, err := cipher.NewGCM(block)
-					if err != nil {
-						ndptr.ReadBuffer = ndptr.ReadBuffer[:][:limbov1.NETMSG_HEADER_SIZE]
-						ndptr.ReadBufferPos = 0
-						return
-					}
-
-					text, err := aead.Open(nil, nonce, ndptr.ReadBuffer[limbov1.NETMSG_HEADER_SIZE:totalLen], ndptr.ReadBuffer[:limbov1.NETMSG_HEADER_SIZE])
-					if err != nil {
-						ndptr.ReadBuffer = ndptr.ReadBuffer[:][:limbov1.NETMSG_HEADER_SIZE]
-						ndptr.ReadBufferPos = 0
-						return
-					}
-
-					if szDiv := int(totalLen-limbov1.NETMSG_HEADER_SIZE) - len(text); szDiv < 0 {
-						szDiv *= -1
-						totalLen += uint32(szDiv)
-						ndptr.ReadBuffer = slices.Grow(ndptr.ReadBuffer, szDiv)
-					}
-
-					copy(ndptr.ReadBuffer[limbov1.NETMSG_HEADER_SIZE:], text)
-				}
-
-				ndptr.SeqInno = nMsg.Sequence()
-
-				if x.isMessageHandlable(e, ndptr, nMsg.Closer()) {
-					loggerv1.Get().Debug("[NetInputSystem::recv] #%d handler conn type: %d; msg type: %d -> %d", e, ndptr.ConnId.Type(), nMsg.Type(), limbov1.MakeNetworkHandler(
-						ndptr.ConnId.Type(),
-						nMsg.Type(),
-					))
-					if handlerFn := limbov1.NetworkHandlers().Get(limbov1.MakeNetworkHandler(
-						ndptr.ConnId.Type(),
-						nMsg.Type(),
-					)); handlerFn != nil {
-						handlerFn(e, nMsg.Closer(), totalLen)
-					}
-				}
-
-				ndptr.ReadBuffer = ndptr.ReadBuffer[:][:limbov1.NETMSG_HEADER_SIZE]
-				ndptr.ReadBufferPos = 0
-				ndptr.IdleDuration = 0
 			}
 		}
+
+		connPtr.ReadBuffer = connPtr.ReadBuffer[:][:limbov1.NETMSG_HEADER_SIZE]
+		connPtr.ReadBufferPos = 0
+		connPtr.IdleDuration = 0
 	})
 }
 
-func (x *NetInputSystem) isMessageHandlable(e limbov1.Entity, sptr *NetClient, buff *byte) bool {
+func (x *NetInputSystem) isMessageHandlable(e limbov1.Entity, connPtr *Conn, buff *byte) bool {
 	netMsg := (*limbov1.NetMessage)(buff)
 
 	// only hello msg if not handshaked
-	if netMsg.Type() != limbov1.NetMessageType(pbsoupev1.MsgType_Hello) && sptr.HandshakedAt == 0 {
+	if netMsg.Type() != limbov1.NetMessageType(pbsoupev1.MsgType_Hello) && connPtr.HandshakedAt == 0 {
 		return false
 	}
 
@@ -428,26 +361,26 @@ func (x *NetInputSystem) isMessageHandlable(e limbov1.Entity, sptr *NetClient, b
 	return netMsg.Flags().Is(limbov1.FlagNone) || netMsg.Flags().Is(limbov1.FlagEncrypted)
 }
 
-func (x *NetInputSystem) isHeaderPotentialValid(e limbov1.Entity, sptr *NetClient, buff *byte, l int) bool {
+func (x *NetInputSystem) isHeaderPotentialValid(e limbov1.Entity, connPtr *Conn, buff *byte, l int) bool {
 	netMsg := (*limbov1.NetMessage)(buff)
 
 	if netMsg.Magic() != limbov1.NETMSG_MAGIC_VALUE || netMsg.Version() != limbov1.NETMSG_VERSION {
 		return false
 	}
 
-	if sptr.HandshakedAt != 0 && netMsg.SessionID() != sptr.Id {
+	if connPtr.HandshakedAt != 0 && netMsg.SessionID() != connPtr.SessionID {
 		return false
 	}
 
-	if sptr.HandshakedAt != 0 && netMsg.KeyID() != sptr.ConnKeyGen {
+	if connPtr.HandshakedAt != 0 && netMsg.KeyID() != connPtr.KeyGen {
 		return false
 	}
 
-	if sptr.HandshakedAt != 0 && netMsg.Sequence() < sptr.SeqInno {
+	if connPtr.HandshakedAt != 0 && netMsg.Sequence() < connPtr.SeqInno {
 		return false
 	}
 
-	if seqdiv := netMsg.Sequence() - sptr.SeqInno; seqdiv >= x.sequenceJumpMax {
+	if seqdiv := netMsg.Sequence() - connPtr.SeqInno; seqdiv >= x.sequenceJumpMax {
 		return false
 	}
 

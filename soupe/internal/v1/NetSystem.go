@@ -121,12 +121,12 @@ func (x *NetSystem) Update(dt time.Duration) {
 }
 
 func (x *NetSystem) Cleanup() {
-	limbov1.Components().IterateB(NetClientType, func(e limbov1.Entity, p unsafe.Pointer) {
+	limbov1.Components().IterateB(ConnType, func(e limbov1.Entity, p unsafe.Pointer) {
 		if limbov1.ContainsComponent(e, DestroyType) {
 			return
 		}
 
-		sptr := (*NetClient)(p)
+		sptr := (*Conn)(p)
 
 		if sptr == nil {
 			NetDisconnect(e, "diconnect")
@@ -134,10 +134,6 @@ func (x *NetSystem) Cleanup() {
 		}
 
 		tn := time.Now().Unix()
-
-		if sptr.SteamId != 0 {
-			return
-		}
 
 		// too long handshake
 		if sptr.HandshakedAt == 0 {
@@ -151,10 +147,15 @@ func (x *NetSystem) Cleanup() {
 }
 
 func (x *NetSystem) Push() {
-	limbov1.Components().IterateB(NetClientType, func(e limbov1.Entity, p unsafe.Pointer) {
-		sptr := (*NetClient)(p)
+	limbov1.Components().IterateB(ConnType, func(e limbov1.Entity, p unsafe.Pointer) {
+		sptr := (*Conn)(p)
 
-		if !limbov1.Networks().IsAlive(sptr.ConnId) || sptr.ConnFileHandle == 0 {
+		if !limbov1.Networks().IsAlive(sptr.Id) {
+			return
+		}
+
+		connFD := uintptr(0)
+		if !limbov1.Networks().Handle(sptr.Id, &connFD) {
 			return
 		}
 
@@ -180,11 +181,11 @@ func (x *NetSystem) Push() {
 			nmsg := (*limbov1.NetMessage)(&sptr.WriteBuffer[0])
 
 			builder := nmsg.Builder().
-				PutKeyID(sptr.ConnKeyGen).
+				PutKeyID(sptr.KeyGen).
 				PutType(netMsgEntry.Typ.Closer()).
 				PutTimestamp(uint64(netMsgEntry.CreatedAt.UnixMilli())).
 				PutSequence(sptr.SeqOutno).
-				PutSessionID(sptr.Id)
+				PutSessionID(sptr.SessionID)
 
 			if len(netMsgEntry.Any) != 0 {
 				builder.ReserveBytes(0, &netMsgEntry.Any[0], len(netMsgEntry.Any))
@@ -198,10 +199,10 @@ func (x *NetSystem) Push() {
 
 			if plen != 0 {
 				if nmsg.Flags().Contains(limbov1.FlagEncrypted) {
-					nonce := sptr.ConnWriteNonce[0:]
+					nonce := sptr.WriteNonce[0:]
 					binary.LittleEndian.PutUint32(nonce[8:], binary.LittleEndian.Uint32(nonce[8:])^nmsg.Sequence())
 
-					block, err := aes.NewCipher(sptr.ConnWriteAES)
+					block, err := aes.NewCipher(sptr.WriteAES)
 					if err != nil {
 						loggerv1.Get().Debug("[NetSystem::Push] #%d: push msg failed on cipher (err: %v)", e, err)
 						return
@@ -251,7 +252,7 @@ func (x *NetSystem) Push() {
 		}
 
 		if sptr.WriteBufferPos < limbov1.NETMSG_HEADER_SIZE {
-			n, err := sysutils.Write(sptr.ConnFileHandle, sptr.WriteBuffer[sptr.WriteBufferPos:limbov1.NETMSG_HEADER_SIZE])
+			n, err := sysutils.Write(connFD, sptr.WriteBuffer[sptr.WriteBufferPos:limbov1.NETMSG_HEADER_SIZE])
 
 			if err == syscall.EAGAIN || err == syscall.EWOULDBLOCK || n == 0 {
 				return
@@ -272,7 +273,7 @@ func (x *NetSystem) Push() {
 		if sptr.WriteBufferPos >= limbov1.NETMSG_HEADER_SIZE {
 			netMsg := limbov1.NetMessageOf(sptr.WriteBuffer)
 
-			n, err := sysutils.Write(sptr.ConnFileHandle, sptr.WriteBuffer[sptr.WriteBufferPos:netMsg.TotalLen()])
+			n, err := sysutils.Write(connFD, sptr.WriteBuffer[sptr.WriteBufferPos:netMsg.TotalLen()])
 
 			if err == syscall.EAGAIN || err == syscall.EWOULDBLOCK || n == 0 {
 				return
@@ -312,7 +313,7 @@ func (x *NetSystem) Accept() {
 			return
 		}
 
-		if count >= 64 {
+		if count >= MAX_CLIENTS {
 			return
 		}
 
@@ -325,17 +326,15 @@ func (x *NetSystem) Accept() {
 			return
 		}
 
-		var fileDescriptor uintptr
-		if rawConn, err := conn.SyscallConn(); true {
-			if err != nil {
-				conn.Close()
-				continue
-			}
+		connFD := uintptr(0)
+		if connFD = limbov1.GetDescriptor(conn); connFD == 0 {
+			conn.Close()
+			continue
+		}
 
-			rawConn.Control(func(fd uintptr) {
-				sysutils.SetNonblock(fd, true)
-				fileDescriptor = fd
-			})
+		if err := sysutils.SetNonblock(connFD, true); err != nil {
+			conn.Close()
+			continue
 		}
 
 		if err := conn.SetNoDelay(true); err != nil {
@@ -354,13 +353,12 @@ func (x *NetSystem) Accept() {
 
 		ent := limbov1.Entities().Create()
 
-		if ptr := limbov1.NewComponentB[NetClient](ent, NetClientType); ptr != nil {
+		if ptr := limbov1.NewComponentB[Conn](ent, ConnType); ptr != nil {
 			var buff [8]byte
 			rand.Read(buff[:])
 
-			ptr.Id = binary.LittleEndian.Uint64(buff[:])
-			ptr.ConnId = connId
-			ptr.ConnFileHandle = fileDescriptor
+			ptr.Id = connId
+			ptr.SessionID = binary.LittleEndian.Uint64(buff[:])
 
 			ptr.ReadBuffer = make([]byte, limbov1.NETMSG_HEADER_SIZE)[:limbov1.NETMSG_HEADER_SIZE]
 
@@ -403,7 +401,7 @@ func (x *NetSystem) sendMessage(typ limbov1.NetMessageType, payload []byte, data
 		return false
 	}
 
-	if sptr := limbov1.ComponentPtr[NetClient](e, NetClientType); sptr != nil {
+	if sptr := limbov1.ComponentPtr[Conn](e, ConnType); sptr != nil {
 		sptr.OutcumQueue.PushBack(&NetMessageEntry{
 			Id:        uuid.NewString(),
 			Typ:       typ,

@@ -1,4 +1,4 @@
-module github.com/untrustedmodders/s2sdkv213
+module github.com/untrustedmodders/s2sdk/213
 
 go 1.25.0
 

@@ -7,11 +7,9 @@ import (
 var ClientType = limbov1.Compotype(0)
 
 type Client struct {
-	Session limbov1.Entity
+	Id uint64
 
-	Token string
-
-	Version string
+	SlotID uint8
 
 	ConnectedAt int64
 }

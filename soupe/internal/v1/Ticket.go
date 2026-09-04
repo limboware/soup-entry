@@ -1,23 +1,15 @@
 package soupev1
 
-import (
-	"unsafe"
-)
+type Ticket uint32
 
-type Ticket uint16
-
-func MakeTicket(id uint8, gen uint8) Ticket {
-	return Ticket(uint16(gen)<<8 | uint16(id))
-}
-
-func TicketFrom(v *byte) Ticket {
-	return MakeTicket(*v, *(*byte)(unsafe.Add(unsafe.Pointer(v), 1)))
+func MakeTicket(id uint16, gen uint8) Ticket {
+	return Ticket(uint32(gen)<<16 | uint32(id))
 }
 
 func (x Ticket) Gen() uint8 {
-	return uint8(x >> 8)
+	return uint8(x >> 16)
 }
 
-func (x Ticket) Id() uint8 {
-	return uint8(x)
+func (x Ticket) Id() uint16 {
+	return uint16(x)
 }
